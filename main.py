@@ -7,8 +7,8 @@ import time
 gui.PAUSE = 0
 
 # Loading the pre-trained face model.
-model_path = './model/res10_300x300_ssd_iter_140000.caffemodel'
-prototxt_path = './model/deploy.prototxt'
+model_path = './model/face_model.caffemodel'
+prototxt_path = './model/face_model_config.prototxt'
 
 # Define a simple maze (1s are walls, 0s are paths)
 maze = [
@@ -83,14 +83,16 @@ def move(detected_faces, bbox):
                 move_player('up')
                 last_mov = 'up'
 
-def draw_maze(frame):
+def draw_maze():
+    maze_frame = np.zeros((len(maze) * 50, len(maze[0]) * 50, 3), dtype=np.uint8)
     for i in range(len(maze)):
         for j in range(len(maze[0])):
             color = (255, 255, 255) if maze[i][j] == 1 else (0, 0, 0)
-            cv2.rectangle(frame, (j * 50, i * 50), (j * 50 + 50, i * 50 + 50), color, -1)
+            cv2.rectangle(maze_frame, (j * 50, i * 50), (j * 50 + 50, i * 50 + 50), color, -1)
     # Draw the player position
     px, py = player_position
-    cv2.rectangle(frame, (py * 50, px * 50), (py * 50 + 50, px * 50 + 50), (0, 0, 255), -1)
+    cv2.rectangle(maze_frame, (py * 50, px * 50), (py * 50 + 50, px * 50 + 50), (0, 0, 255), -1)
+    return maze_frame
 
 def play(prototxt_path, model_path):
     global last_mov
@@ -103,8 +105,9 @@ def play(prototxt_path, model_path):
 
     # Co-ordinates of the bounding box on frame
     frame_width, frame_height = int(cap.get(3)), int(cap.get(4))
-    left_x, top_y = frame_width // 2 - 150, frame_height // 2 - 200
-    right_x, bottom_y = frame_width // 2 + 150, frame_height // 2 + 200
+    box_width, box_height = 250, 250  # Set smaller bounding box dimensions
+    left_x, top_y = frame_width // 2 - box_width // 2, frame_height // 2 - box_height // 2
+    right_x, bottom_y = frame_width // 2 + box_width // 2, frame_height // 2 + box_height // 2
     bbox = [left_x, right_x, bottom_y, top_y]
 
     while True:
@@ -118,8 +121,12 @@ def play(prototxt_path, model_path):
         frame = cv2.rectangle(frame, (left_x, top_y), (right_x, bottom_y), (0, 0, 255), 5)
 
         move(detected_faces, bbox)
-        draw_maze(frame)  # Draw the maze on the frame
 
+        # Update and display the maze view
+        maze_view = draw_maze()
+        cv2.imshow('maze_view', maze_view)
+
+        # Display the camera feed
         cv2.imshow('camera_feed', frame)
         if cv2.waitKey(5) == 27:  # Exit on 'esc'
             break
