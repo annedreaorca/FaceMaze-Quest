@@ -3,24 +3,87 @@ import numpy as np
 import pyautogui as gui
 import time
 import winsound 
+from random import randint
 
 gui.PAUSE = 0
 
 model_path = './model/face_model.caffemodel'
 prototxt_path = './model/face_model_config.prototxt'
 
-maze = [
-    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-    [0, 0, 1, 0, 0, 1, 1, 1, 0, 1],
-    [1, 0, 1, 0, 1, 0, 0, 1, 0, 1],
-    [1, 0, 1, 0, 1, 1, 0, 0, 0, 1],
-    [1, 0, 0, 0, 0, 1, 0, 1, 1, 1],
-    [1, 1, 1, 1, 0, 0, 0, 1, 0, 1],
-    [1, 0, 0, 1, 0, 1, 0, 0, 0, 1],
-    [1, 1, 0, 0, 0, 1, 1, 1, 0, 1],
-    [1, 0, 1, 0, 0, 0, 0, 1, 0, 0],
-    [1, 1, 0, 1, 1, 1, 1, 1, 0, 0]
-]
+class Cell:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.visited = False
+        self.walls = {'top': True, 'right': True, 'bottom': True, 'left': True}
+
+    def check_neighbors(self, cols, rows, grid_cells):
+        neighbors = []
+        index = lambda x, y: x + y * cols
+        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]  # Left, right, top, bottom
+        for dx, dy in directions:
+            nx, ny = self.x + dx, self.y + dy
+            if 0 <= nx < cols and 0 <= ny < rows:
+                neighbor = grid_cells[index(nx, ny)]
+                if not neighbor.visited:
+                    neighbors.append(neighbor)
+        return neighbors[randint(0, len(neighbors) - 1)] if neighbors else None
+
+class Maze:
+    def __init__(self, cols, rows):
+        self.cols = cols
+        self.rows = rows
+        self.grid_cells = [Cell(x, y) for y in range(rows) for x in range(cols)]
+
+    def remove_walls(self, current, next):
+        dx = current.x - next.x
+        if dx == 1:
+            current.walls['left'] = False
+            next.walls['right'] = False
+        elif dx == -1:
+            current.walls['right'] = False
+            next.walls['left'] = False
+        dy = current.y - next.y
+        if dy == 1:
+            current.walls['top'] = False
+            next.walls['bottom'] = False
+        elif dy == -1:
+            current.walls['bottom'] = False
+            next.walls['top'] = False
+
+    def generate_maze(self):
+        current_cell = self.grid_cells[0]
+        stack = []
+        break_count = 1
+        while break_count != len(self.grid_cells):
+            current_cell.visited = True
+            next_cell = current_cell.check_neighbors(self.cols, self.rows, self.grid_cells)
+            if next_cell:
+                next_cell.visited = True
+                break_count += 1
+                stack.append(current_cell)
+                self.remove_walls(current_cell, next_cell)
+                current_cell = next_cell
+            elif stack:
+                current_cell = stack.pop()
+        return self.grid_cells
+
+# Dynamic maze creation
+maze_cols, maze_rows = 10, 10
+maze_obj = Maze(maze_cols, maze_rows)
+grid_cells = maze_obj.generate_maze()
+
+# Convert the maze grid into a 2D list for FaceMaze Quest logic
+maze = [[1 for _ in range(maze_cols)] for _ in range(maze_rows)]
+for cell in grid_cells:
+    maze[cell.y][cell.x] = 0
+
+# Initialize other game elements
+player_position = [0, 0]  # Starting position
+finish_position = [maze_rows - 1, maze_cols - 1]  # Goal position
+player_path = [player_position.copy()]
+start_time = time.time()
+maze_completed = False
 
 player_position = [0, 0] # Starting position
 player_path = [player_position.copy()]  # To store the player's path
@@ -62,15 +125,18 @@ def checkRect(detected_faces, bbox):
 def move_player(direction):
     global player_position
     x, y = player_position
-    if direction == 'up' and maze[x - 1][y] == 0:
+    current_cell = grid_cells[x * maze_cols + y]
+
+    if direction == 'up' and not current_cell.walls['top']:
         player_position[0] -= 1
-    elif direction == 'down' and maze[x + 1][y] == 0:
+    elif direction == 'down' and not current_cell.walls['bottom']:
         player_position[0] += 1
-    elif direction == 'left' and maze[x][y - 1] == 0:
+    elif direction == 'left' and not current_cell.walls['left']:
         player_position[1] -= 1
-    elif direction == 'right' and maze[x][y + 1] == 0:
+    elif direction == 'right' and not current_cell.walls['right']:
         player_position[1] += 1
-    player_path.append(player_position.copy())  # Track the new path
+
+    player_path.append(player_position.copy())  # Track the player's path
 
 def move(detected_faces, bbox):
     global last_mov
@@ -102,43 +168,68 @@ finish_position = [9, 9]
 
 maze_completed = False
 
+import math
+
+# Global variable to store the current rotation angle of the character
+current_angle = 0
+
 def draw_maze():
     cell_size = 60
-    maze_frame = np.ones((len(maze) * cell_size, len(maze[0]) * cell_size, 3), dtype=np.uint8) * 255  # White background
+    maze_frame = np.zeros((maze_rows * cell_size, maze_cols * cell_size, 3), dtype=np.uint8)  # Black background
 
-    for i in range(len(maze)):
-        for j in range(len(maze[0])):
-            # Colors for player and finish
-            player_color = (0, 255, 0)  # Green for player
-            finish_color = (255, 0, 0)  # Red for finish
-            line_color = (0, 0, 0)  # Black for lines
+    # Load assets
+    cell_img = cv2.imread('./assets/cell.png')
+    hline_img = cv2.imread('./assets/hline.png')
+    vline_img = cv2.imread('./assets/vline.png')
+    character_img = cv2.imread('./assets/character.png', cv2.IMREAD_UNCHANGED)  # Load the player character image
 
-            # Draw grid cell walls based on maze layout
-            top_left = (j * cell_size, i * cell_size)
-            bottom_right = ((j + 1) * cell_size, (i + 1) * cell_size)
+    # Resize assets to fit wall/cell sizes
+    cell_img = cv2.resize(cell_img, (cell_size, cell_size))
+    hline_img = cv2.resize(hline_img, (cell_size, int(cell_size / 6)))
+    vline_img = cv2.resize(vline_img, (int(cell_size / 6), cell_size))
+    character_img = cv2.resize(character_img, (cell_size, cell_size))  # Resize character image to fit a cell
 
-            if maze[i][j] == 1:
-                # Draw borders around each cell to form the maze structure
-                cv2.rectangle(maze_frame, top_left, bottom_right, line_color, 1)  # Outline of the cell
+    for cell in grid_cells:
+        x, y = cell.x, cell.y
+        top_left_x, top_left_y = x * cell_size, y * cell_size
+
+        # Add the cell base image
+        maze_frame[top_left_y:top_left_y + cell_size, top_left_x:top_left_x + cell_size] = cell_img
+
+        # Draw walls with assets
+        if cell.walls['top']:  # Top wall
+            maze_frame[top_left_y:top_left_y + hline_img.shape[0], top_left_x:top_left_x + cell_size] = hline_img
+        if cell.walls['right']:  # Right wall
+            maze_frame[top_left_y:top_left_y + cell_size, top_left_x + cell_size - vline_img.shape[1]:top_left_x + cell_size] = vline_img
+        if cell.walls['bottom']:  # Bottom wall
+            maze_frame[top_left_y + cell_size - hline_img.shape[0]:top_left_y + cell_size, top_left_x:top_left_x + cell_size] = hline_img
+        if cell.walls['left']:  # Left wall
+            maze_frame[top_left_y:top_left_y + cell_size, top_left_x:top_left_x + vline_img.shape[1]] = vline_img
 
     # Draw the player's current position
     px, py = player_position
-    player_top_left = (py * cell_size, px * cell_size)
-    player_bottom_right = (py * cell_size + cell_size, px * cell_size + cell_size)
-    cv2.rectangle(maze_frame, player_top_left, player_bottom_right, player_color, -1)
+    player_top_left_y, player_top_left_x = px * cell_size, py * cell_size
+    player_bottom_right_y, player_bottom_right_x = (px + 1) * cell_size, (py + 1) * cell_size
+
+    # Overlay the character image at the player's position
+    player_area = maze_frame[player_top_left_y:player_bottom_right_y, player_top_left_x:player_bottom_right_x]
+    alpha = character_img[:, :, 3] / 255.0  # Extract alpha channel for blending
+    for c in range(3):  # Blend each color channel
+        player_area[:, :, c] = (
+            alpha * character_img[:, :, c] + (1 - alpha) * player_area[:, :, c]
+        )
 
     # Draw the finish position
     fx, fy = finish_position
+    finish_color = (255, 0, 0)  # Red for finish
     finish_top_left = (fy * cell_size, fx * cell_size)
     finish_bottom_right = (fy * cell_size + cell_size, fx * cell_size + cell_size)
     cv2.rectangle(maze_frame, finish_top_left, finish_bottom_right, finish_color, -1)
 
-    # Overlay maze completion message
     if maze_completed:
-        cv2.putText(maze_frame, "Maze Completed!", (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (100, 100, 100), 3)
-    
-    return maze_frame
+        cv2.putText(maze_frame, "Maze Completed!", (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 3)
 
+    return maze_frame
 
 # Check if player has reached the finish position after each move
 def check_finish():
