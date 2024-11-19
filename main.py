@@ -173,22 +173,47 @@ import math
 # Global variable to store the current rotation angle of the character
 current_angle = 0
 
+import numpy as np
+import cv2
+
 def draw_maze():
     cell_size = 60
     maze_frame = np.zeros((maze_rows * cell_size, maze_cols * cell_size, 3), dtype=np.uint8)  # Black background
 
     # Load assets
     cell_img = cv2.imread('./assets/cell.png')
-    hline_img = cv2.imread('./assets/hline.png')
-    vline_img = cv2.imread('./assets/vline.png')
+    hline_img = cv2.imread('./assets/box.png')
+    vline_img = cv2.imread('./assets/box.png')
     character_img = cv2.imread('./assets/character.png', cv2.IMREAD_UNCHANGED)  # Load the player character image
+    start_img = cv2.imread('./assets/start.png', cv2.IMREAD_UNCHANGED)  # Load the start position image
+    goal_img = cv2.imread('./assets/goal.png', cv2.IMREAD_UNCHANGED)  # Load the goal image
 
     # Resize assets to fit wall/cell sizes
     cell_img = cv2.resize(cell_img, (cell_size, cell_size))
-    hline_img = cv2.resize(hline_img, (cell_size, int(cell_size / 6)))
-    vline_img = cv2.resize(vline_img, (int(cell_size / 6), cell_size))
-    character_img = cv2.resize(character_img, (cell_size, cell_size))  # Resize character image to fit a cell
+    hline_img = cv2.resize(hline_img, (cell_size, int(cell_size / 15)))
+    vline_img = cv2.resize(vline_img, (int(cell_size / 15), cell_size))
+    start_img = cv2.resize(start_img, (cell_size, cell_size))  # Resize start image to fit a cell
+    goal_img = cv2.resize(goal_img, (cell_size, cell_size))  # Resize goal image to fit a cell
 
+    # Resize the character image to be smaller than the cell
+    char_scale = 0.6 # Scale factor for the character
+    char_width = int(cell_size * char_scale)
+    char_height = int(cell_size * char_scale)
+    character_img = cv2.resize(character_img, (char_width, char_height))  # Resize character image
+
+    def blend_image(background, overlay, top_left):
+        """Blends an overlay image with transparency onto a background."""
+        x, y = top_left
+        h, w = overlay.shape[:2]
+        alpha = overlay[:, :, 3] / 255.0  # Extract alpha channel for blending
+        for c in range(3):  # Blend each color channel
+            if (y + h <= background.shape[0]) and (x + w <= background.shape[1]):  # Ensure the overlay fits
+                background[y:y + h, x:x + w, c] = (
+                    alpha * overlay[:, :, c] + (1 - alpha) * background[y:y + h, x:x + w, c]
+                )
+        return background
+
+    # Draw the maze cells and walls
     for cell in grid_cells:
         x, y = cell.x, cell.y
         top_left_x, top_left_y = x * cell_size, y * cell_size
@@ -206,25 +231,22 @@ def draw_maze():
         if cell.walls['left']:  # Left wall
             maze_frame[top_left_y:top_left_y + cell_size, top_left_x:top_left_x + vline_img.shape[1]] = vline_img
 
+    # Draw the starting position
+    sx, sy = player_path[0]  # Starting position
+    start_top_left_y, start_top_left_x = sx * cell_size, sy * cell_size
+    blend_image(maze_frame, start_img, (start_top_left_x, start_top_left_y))
+
     # Draw the player's current position
     px, py = player_position
-    player_top_left_y, player_top_left_x = px * cell_size, py * cell_size
-    player_bottom_right_y, player_bottom_right_x = (px + 1) * cell_size, (py + 1) * cell_size
+    player_top_left_y = px * cell_size + (cell_size - char_height) // 2
+    player_top_left_x = py * cell_size + (cell_size - char_width) // 2
+    blend_image(maze_frame, character_img, (player_top_left_x, player_top_left_y))
 
-    # Overlay the character image at the player's position
-    player_area = maze_frame[player_top_left_y:player_bottom_right_y, player_top_left_x:player_bottom_right_x]
-    alpha = character_img[:, :, 3] / 255.0  # Extract alpha channel for blending
-    for c in range(3):  # Blend each color channel
-        player_area[:, :, c] = (
-            alpha * character_img[:, :, c] + (1 - alpha) * player_area[:, :, c]
-        )
-
-    # Draw the finish position
+    # Draw the finish position (goal) with the goal image
     fx, fy = finish_position
-    finish_color = (255, 0, 0)  # Red for finish
-    finish_top_left = (fy * cell_size, fx * cell_size)
-    finish_bottom_right = (fy * cell_size + cell_size, fx * cell_size + cell_size)
-    cv2.rectangle(maze_frame, finish_top_left, finish_bottom_right, finish_color, -1)
+    goal_top_left_y = fx * cell_size
+    goal_top_left_x = fy * cell_size
+    blend_image(maze_frame, goal_img, (goal_top_left_x, goal_top_left_y))
 
     if maze_completed:
         cv2.putText(maze_frame, "Maze Completed!", (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 3)
